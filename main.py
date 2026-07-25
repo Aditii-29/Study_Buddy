@@ -2,18 +2,15 @@
 import sys
 import os
 
-# Initialize database schemas before booting user interface loops
-from database.db_manager import initialize_database
+# Launch the master multi-view user interface canvas track
 from gui.dashboard import StudyGuardianUI
 
 
 def main():
     print("[SYSTEM INITIALIZATION] Booting Study Buddy Suite...")
+    print("[DATABASE] Connecting to MongoDB Server backend layout...")
 
-    # Ensure local database files and tables exist cleanly on startup
-    initialize_database()
-
-    # Launch the master multi-view user interface canvas track
+    # Launch the user interface canvas directly
     app = StudyGuardianUI()
     app.mainloop()
 

@@ -44,7 +44,8 @@ class LiveMonitoringView(ctk.CTkFrame):
                      text_color="#e5989b").pack(side="right")
 
         # The Actual Canvas Screen Render Label (Updated by Threading Loop)
-        self.live_video_label = ctk.CTkLabel(video_card, text="[ Connecting Camera Stream Component... ]",
+        self.live_video_label = ctk.CTkLabel(video_card,
+                                             text="🎥 Session is Not Started\nGo to the Home Hub to begin tracking!",
                                              font=ctk.CTkFont(size=14), fg_color="#f5f2eb", corner_radius=10)
         self.live_video_label.pack(fill="both", expand=True, padx=15, pady=(0, 15))
 
@@ -60,9 +61,9 @@ class LiveMonitoringView(ctk.CTkFrame):
         card_eye.pack_propagate(False)
         ctk.CTkLabel(card_eye, text="👁️ Eye Status", font=ctk.CTkFont(family="Comic Sans MS", size=12, weight="bold"),
                      text_color="#4a4e69").pack(anchor="w", padx=10, pady=(5, 0))
-        self.lbl_live_eye_val = ctk.CTkLabel(card_eye, text="OPEN",
+        self.lbl_live_eye_val = ctk.CTkLabel(card_eye, text="Idle",
                                              font=ctk.CTkFont(family="Comic Sans MS", size=16, weight="bold"),
-                                             text_color="#2a9d8f")
+                                             text_color="#4a4e69")
         self.lbl_live_eye_val.pack(anchor="w", padx=15)
 
         # 2. Focus Level Card
@@ -72,9 +73,9 @@ class LiveMonitoringView(ctk.CTkFrame):
         card_focus.pack_propagate(False)
         ctk.CTkLabel(card_focus, text="🎯 Focus Level", font=ctk.CTkFont(family="Comic Sans MS", size=12, weight="bold"),
                      text_color="#4a4e69").pack(anchor="w", padx=10, pady=(5, 0))
-        self.lbl_live_focus_val = ctk.CTkLabel(card_focus, text="85%",
+        self.lbl_live_focus_val = ctk.CTkLabel(card_focus, text="--%",
                                                font=ctk.CTkFont(family="Comic Sans MS", size=26, weight="bold"),
-                                               text_color="#5e548e")
+                                               text_color="#4a4e69")
         self.lbl_live_focus_val.pack(pady=2)
 
         # 3. Head Posture Card
@@ -85,9 +86,9 @@ class LiveMonitoringView(ctk.CTkFrame):
         ctk.CTkLabel(card_posture, text="👤 Head Posture",
                      font=ctk.CTkFont(family="Comic Sans MS", size=12, weight="bold"), text_color="#4a4e69").pack(
             anchor="w", padx=10, pady=(5, 0))
-        self.lbl_live_posture_val = ctk.CTkLabel(card_posture, text="Good",
+        self.lbl_live_posture_val = ctk.CTkLabel(card_posture, text="Idle",
                                                  font=ctk.CTkFont(family="Comic Sans MS", size=14, weight="bold"),
-                                                 text_color="#2a9d8f")
+                                                 text_color="#4a4e69")
         self.lbl_live_posture_val.pack(anchor="w", padx=15)
 
         # ==========================================
@@ -116,15 +117,36 @@ class LiveMonitoringView(ctk.CTkFrame):
         ctk.CTkLabel(t_card2, text="00:00", font=ctk.CTkFont(family="Consolas", size=22, weight="bold"),
                      text_color="#e5989b").pack()
 
-        # Card C: Break Reminder & Stop Button
+        # Card C: Cute Break Reminder Status Card (Replaces the Button layout)
         t_card3 = ctk.CTkFrame(timers_row, fg_color="#faf6ee", border_width=1, border_color="#c3b8a5", corner_radius=12,
                                height=85)
         t_card3.pack(side="left", expand=True, fill="both", padx=4)
+        ctk.CTkLabel(t_card3, text="☕ Break Reminder", font=ctk.CTkFont(family="Comic Sans MS", size=11, weight="bold"),
+                     text_color="#4a4e69").pack(pady=(8, 0))
 
-        self.btn_stop = ctk.CTkButton(
-            t_card3, text="Stop Session ■", height=40, corner_radius=10,
-            font=ctk.CTkFont(family="Comic Sans MS", size=13, weight="bold"),
-            fg_color="#ff4d6d", text_color="#ffffff", hover_color="#ff758f",
-            command=self.stop_callback
-        )
-        self.btn_stop.pack(expand=True, padx=15, pady=15)
+        self.lbl_break_status = ctk.CTkLabel(t_card3, text="Focusing...",
+                                             font=ctk.CTkFont(family="Comic Sans MS", size=16, weight="bold"),
+                                             text_color="#2a9d8f")
+        self.lbl_break_status.pack(pady=4)
+
+    # ==========================================
+    # DYNAMIC STATE ENGINE CONTROLLERS
+    # ==========================================
+    def update_ui_state(self, session_running):
+        """Updates internal views and clears lingering frame captures without utilizing a button."""
+        if session_running:
+            self.lbl_break_status.configure(text="Session Active ⚡", text_color="#5e548e")
+        else:
+            self.lbl_break_status.configure(text="Focus Idle 💤", text_color="#4a4e69")
+
+            # Clear old webcam frame snapshots completely away from memory view limits
+            self.live_video_label.configure(
+                image="",
+                text="🎥 Session is Not Started\nGo to the Home Hub to begin tracking!"
+            )
+            self.live_video_label.image = None
+
+            # Clean up the dashboard's side telemetry stats back to default states
+            self.lbl_live_eye_val.configure(text="Idle", text_color="#4a4e69")
+            self.lbl_live_focus_val.configure(text="--%", text_color="#4a4e69")
+            self.lbl_live_posture_val.configure(text="Idle", text_color="#4a4e69")

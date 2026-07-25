@@ -7,7 +7,10 @@ import queue
 import time
 import sqlite3
 
+import mediapipe as mp
 from numpy.ma.core import size
+
+from gui.alarm_settings import AlarmSettingsView
 
 # Ensure root directory is in system path so we can import cleanly from other layers
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -15,7 +18,8 @@ import config
 from Engine.eye_tracker import run_eye_tracker
 from database.db_manager import log_study_session, DB_PATH
 from gui.live_monitoring import LiveMonitoringView
-
+from Engine.auth_backend import login_user, register_user
+from gui.study_sessions import StudySessionsView
 
 class StudyGuardianUI(ctk.CTk):
     def __init__(self):
@@ -45,9 +49,13 @@ class StudyGuardianUI(ctk.CTk):
 
         self.status_queue = queue.Queue()
 
+        self.selected_alarm_sound = ctk.StringVar(value="Classic Beep")
+        self.alarm_volume = ctk.DoubleVar(value=0.7)
+        self.drowsy_time_threshold = ctk.IntVar(value=2)
         # Initialize Container Frames for States
         self.login_view_frame = None
         self.main_view_frame = None
+        self.alarm_canvas=None
 
         # Build structures and launch the Login screen immediately
         self.create_login_screen_layout()
@@ -60,21 +68,22 @@ class StudyGuardianUI(ctk.CTk):
     # STATE VIEW 1: THE WELCOME / LOGIN SCREEN
     # ========================================================
     def create_login_screen_layout(self):
-        """Builds a beautiful cozy matching login screen entry gate."""
+        """Builds a beautiful cozy matching login and registration layout entry gate."""
         self.login_view_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.is_register_mode = False  # Track state toggle cleanly
 
-        # Welcoming Header
-        lbl_welcome_title = ctk.CTkLabel(
+        # Welcoming Header Labels
+        self.lbl_welcome_title = ctk.CTkLabel(
             self.login_view_frame, text="Welcome, Study Buddy",
             font=ctk.CTkFont(family="Comic Sans MS", size=38, weight="bold"), text_color="#5e548e"
         )
-        lbl_welcome_title.pack(pady=(120, 10))
+        self.lbl_welcome_title.pack(pady=(80, 10))
 
-        lbl_welcome_sub = ctk.CTkLabel(
+        self.lbl_welcome_sub = ctk.CTkLabel(
             self.login_view_frame, text="Enter your workspace credentials to join your desk.",
             font=ctk.CTkFont(family="Comic Sans MS", size=15), text_color="#4a4e69"
         )
-        lbl_welcome_sub.pack(pady=(0, 40))
+        self.lbl_welcome_sub.pack(pady=(0, 30))
 
         # Input Forms Matrix Wrapper
         form_frame = ctk.CTkFrame(self.login_view_frame, fg_color="transparent")
@@ -87,6 +96,15 @@ class StudyGuardianUI(ctk.CTk):
         )
         self.entry_username.pack(pady=10)
 
+        # Added dynamic Email Input tracking field structure cleanly
+        self.entry_email = ctk.CTkEntry(
+            form_frame, placeholder_text="Email Address", width=300, height=45, corner_radius=12,
+            border_width=2, border_color="#5e548e", fg_color="#faf6ee", text_color="#4a4e69",
+            font=ctk.CTkFont(family="Comic Sans MS", size=13)
+        )
+        # Hidden by default because we start in Login Mode!
+        self.entry_email.pack_forget()
+
         self.entry_password = ctk.CTkEntry(
             form_frame, placeholder_text="Password", show="*", width=300, height=45, corner_radius=12,
             border_width=2, border_color="#5e548e", fg_color="#faf6ee", text_color="#4a4e69",
@@ -94,8 +112,8 @@ class StudyGuardianUI(ctk.CTk):
         )
         self.entry_password.pack(pady=10)
 
-        # Login Action Trigger Button
-        btn_login_trigger = ctk.CTkButton(
+        # Main Action Execution Button
+        self.btn_login_trigger = ctk.CTkButton(
             self.login_view_frame, text="Enter Workspace  →",
             width=300, height=50, corner_radius=16,
             font=ctk.CTkFont(family="Comic Sans MS", size=16, weight="bold"),
@@ -103,7 +121,33 @@ class StudyGuardianUI(ctk.CTk):
             border_width=2, border_color="#5e548e",
             command=self.authenticate_and_launch_dashboard
         )
-        btn_login_trigger.pack(pady=30)
+        self.btn_login_trigger.pack(pady=20)
+
+        # Soft underground switch label tracking option link
+        self.btn_toggle_mode = ctk.CTkButton(
+            self.login_view_frame, text="Don't have an account? Register here",
+            font=ctk.CTkFont(family="Comic Sans MS", size=12, underline=True),
+            fg_color="transparent", text_color="#5e548e", hover_color="#faf6ee",
+            command=self.toggle_auth_view_mode
+        )
+        self.btn_toggle_mode.pack(pady=5)
+
+    def toggle_auth_view_mode(self):
+        """Swaps view layouts between clean Login forms and complete Registration paths dynamically."""
+        if not self.is_register_mode:
+            self.is_register_mode = True
+            self.lbl_welcome_title.configure(text="Create Account")
+            self.lbl_welcome_sub.configure(text="Sign up below to secure your workspace profile.")
+            self.entry_email.pack(after=self.entry_username, pady=10)  # Reveal email field
+            self.btn_login_trigger.configure(text="Complete Registration  ✓")
+            self.btn_toggle_mode.configure(text="Already have an account? Sign In instead")
+        else:
+            self.is_register_mode = False
+            self.lbl_welcome_title.configure(text="Welcome, Study Buddy")
+            self.lbl_welcome_sub.configure(text="Enter your workspace credentials to join your desk.")
+            self.entry_email.pack_forget()  # Hide email field layout cleanly
+            self.btn_login_trigger.configure(text="Enter Workspace  →")
+            self.btn_toggle_mode.configure(text="Don't have an account? Register here")
 
     def show_login_screen(self):
         """Mounts the login window to full view."""
@@ -112,19 +156,50 @@ class StudyGuardianUI(ctk.CTk):
         self.login_view_frame.pack(fill="both", expand=True)
 
     def authenticate_and_launch_dashboard(self):
-        """Verifies access input parameters and cleanly transitions into workspace layout."""
+        """Verifies access input parameters via MongoDB backend routing and cleanly transitions into workspace."""
+        from tkinter import messagebox
+
+        # Pull text directly from custom elements
         username = self.entry_username.get().strip()
-        if username == "":
-            username = "Scholar"
+        password = self.entry_password.get().strip()
 
-        print(f"[AUTH SYSTEM] Access Granted for profile target: {username}")
+        # ==========================================
+        # PATH PATH A: USER REGISTRATION EXECUTION
+        # ==========================================
+        if hasattr(self, 'is_register_mode') and self.is_register_mode:
+            email = self.entry_email.get().strip()
 
-        # Unpack Login, build, and deploy the main dual-column dashboard
-        self.login_view_frame.pack_forget()
-        self.create_main_dashboard_layout()
-        self.main_view_frame.pack(fill="both", expand=True)
+            # Execute database insertion request pipeline
+            success, message = register_user(username, email, password)
 
-    # ========================================================
+            if success:
+                messagebox.showinfo("Registration Success", message)
+                # Toggle interface look back to Login cleanly
+                self.toggle_auth_view_mode()
+                # Clear security fields for safety
+                self.entry_password.delete(0, 'end')
+            else:
+                messagebox.showerror("Registration Error", message)
+            return
+
+        # ==========================================
+        # PATH PATH B: USER LOGIN VERIFICATION EXECUTION
+        # ==========================================
+        else:
+            # We treat the username box as the login field (adjust to email if preferred)
+            # For uniformity matching auth_backend.py, we assume they input their email into the box
+            success, result_or_username = login_user(username, password)
+
+            if success:
+                print(f"[AUTH SYSTEM] Access Granted for profile target: {result_or_username}")
+                messagebox.showinfo("Access Granted", f"Welcome back to your desk, {result_or_username}!")
+
+                # Unpack Login, build, and deploy the main dual-column dashboard
+                self.login_view_frame.pack_forget()
+                self.create_main_dashboard_layout()
+                self.main_view_frame.pack(fill="both", expand=True)
+            else:
+                messagebox.showerror("Authentication Failed", result_or_username)
     # STATE VIEW 2: THE MAIN WORKSPACE INTERFACE LAYOUT
     # ========================================================
     def create_main_dashboard_layout(self):
@@ -250,10 +325,11 @@ class StudyGuardianUI(ctk.CTk):
             master=self.right_content_pane,
             stop_session_callback=self.start_button_clicked
         )
-
+        self.alarm_canvas =AlarmSettingsView(master=self.right_content_pane, ui_parent=self)
         # Display defaults
         self.main_canvas.pack(fill="both", expand=True)
         self.current_visible_content_frame = self.main_canvas
+        self.study_sessions_canvas = StudySessionsView(master=self.right_content_pane)
 
     # ========================================================
     # RIGHT CANVAS SECTIONAL COMPONENT GENERATORS
@@ -369,19 +445,35 @@ class StudyGuardianUI(ctk.CTk):
             self.current_visible_content_frame = self.main_canvas
 
         elif target_tab == "live":
-            self.btn_live_monitor.configure(fg_color="#decfe6", text_color="#5e548e", font=ctk.CTkFont(family="Comic Sans MS", size=14, weight="bold"))
+            self.btn_live_monitor.configure(fg_color="#decfe6", text_color="#5e548e",
+                                            font=ctk.CTkFont(family="Comic Sans MS", size=14, weight="bold"))
             self.live_monitoring_canvas.pack(fill="both", expand=True)
             self.current_visible_content_frame = self.live_monitoring_canvas
-
+            # Simply update the state engine cleanly
+            self.live_monitoring_canvas.update_ui_state(self.session_running)
+        elif target_tab == "sessions":
+            # Highlight sidebar menu button
+            self.btn_sessions.configure(fg_color="#decfe6", text_color="#5e548e",
+                                     font=ctk.CTkFont(family="Comic Sans MS", size=14, weight="bold"))
+            # Show the new beautiful frame canvas layout workspace
+            self.study_sessions_canvas.pack(fill="both", expand=True)
+            self.current_visible_content_frame = self.study_sessions_canvas
         elif target_tab == "history":
             self.btn_history_log.configure(fg_color="#decfe6", text_color="#5e548e", font=ctk.CTkFont(family="Comic Sans MS", size=14, weight="bold"))
             self.history_canvas.pack(fill="both", expand=True)
             self.current_visible_content_frame = self.history_canvas
             self.load_database_history_into_ui()
 
+        elif target_tab == "alarm":
+            self.btn_alarm_config.configure(fg_color="#decfe6", text_color="#5e548e",
+                                            font=ctk.CTkFont(family="Comic Sans MS", size=14, weight="bold"))
+
+            # --- MAKE SURE THESE ARGS ARE EXACTLY HERE ---
+            self.alarm_canvas.pack(fill="both", expand=True)
+            self.current_visible_content_frame = self.alarm_canvas
+
         else:
             target_btn_map = {
-                "sessions": self.btn_sessions, "alarm": self.btn_alarm_config,
                 "reports": self.btn_reports, "settings": self.btn_settings, "profile": self.btn_profile_view
             }
             active_btn = target_btn_map.get(target_tab)
@@ -442,6 +534,7 @@ class StudyGuardianUI(ctk.CTk):
 
             self.ai_thread = threading.Thread(target=self.worker_thread_task, daemon=True)
             self.ai_thread.start()
+
         else:
             self.session_running = False
             actual_seconds_studied = self.total_session_seconds - self.study_seconds_left
@@ -450,16 +543,25 @@ class StudyGuardianUI(ctk.CTk):
             if actual_seconds_studied > 0:
                 log_study_session(actual_seconds_studied, self.drowsy_alerts_count)
 
+            # ─── RESET THE INTERNAL TIMER TRACKERS ───
             self.study_seconds_left = config.STUDY_MINUTES * 60
+
+            # ─── UPDATE AND RESET UI LABELS INSTANTLY ───
+            # 1. Reset the main focus hub timer display
             self.lbl_timer_clock.configure(text="50:00")
             self.lbl_timer_clock.pack_forget()
+
+            # 2. Reset the live monitoring session timer clock view cleanly
+            if hasattr(self, 'live_monitoring_canvas'):
+                self.live_monitoring_canvas.lbl_live_session_clock.configure(text="00:50:00")
+
             self.drowsy_alerts_count = 0
             self.was_drowsy_last_frame = False
 
             # Drop back down to cozy entry hub upon execution stop
             self.switch_content_tab_smoothly("focus")
-            self.btn_action_trigger.configure(text="Start Session  →", fg_color="#faf6ee", text_color="#5e548e", border_color="#5e548e")
-
+            self.btn_action_trigger.configure(text="Start Session  →", fg_color="#faf6ee", text_color="#5e548e",
+                                              border_color="#5e548e")
     def worker_thread_task(self):
         def focus_signal():
             if self.session_running: self.status_queue.put("FOCUS")
