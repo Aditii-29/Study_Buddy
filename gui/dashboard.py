@@ -9,7 +9,7 @@ import sqlite3
 
 import mediapipe as mp
 from numpy.ma.core import size
-
+from gui.reports import ReportsView
 from gui.alarm_settings import AlarmSettingsView
 
 # Ensure root directory is in system path so we can import cleanly from other layers
@@ -30,7 +30,7 @@ class StudyGuardianUI(ctk.CTk):
         # ==========================================
         self.title("Study Buddy")
         self.geometry("1020x660")
-        self.resizable(False, False)
+        self.resizable(True, True)
 
         # Setting a soft pastel, study-friendly background surface
         ctk.set_appearance_mode("light")
@@ -48,6 +48,7 @@ class StudyGuardianUI(ctk.CTk):
         self.last_clock_tick = time.time()
 
         self.status_queue = queue.Queue()
+        self.protocol("WM_DELETE_WINDOW",self.on_closing)
 
         self.selected_alarm_sound = ctk.StringVar(value="Classic Beep")
         self.alarm_volume = ctk.DoubleVar(value=0.7)
@@ -325,12 +326,12 @@ class StudyGuardianUI(ctk.CTk):
             master=self.right_content_pane,
             stop_session_callback=self.start_button_clicked
         )
-        self.alarm_canvas =AlarmSettingsView(master=self.right_content_pane, ui_parent=self)
+        self.alarm_canvas = AlarmSettingsView(master=self.right_content_pane, ui_parent=self)
         # Display defaults
         self.main_canvas.pack(fill="both", expand=True)
         self.current_visible_content_frame = self.main_canvas
         self.study_sessions_canvas = StudySessionsView(master=self.right_content_pane)
-
+        self.reports_canvas = ReportsView(master=self.right_content_pane)
     # ========================================================
     # RIGHT CANVAS SECTIONAL COMPONENT GENERATORS
     # ========================================================
@@ -471,6 +472,12 @@ class StudyGuardianUI(ctk.CTk):
             # --- MAKE SURE THESE ARGS ARE EXACTLY HERE ---
             self.alarm_canvas.pack(fill="both", expand=True)
             self.current_visible_content_frame = self.alarm_canvas
+
+        elif target_tab in ["reports", "report"]:
+            self.btn_reports.configure(fg_color="#decfe6", text_color="#5e548e",
+                                       font=ctk.CTkFont(family="Comic Sans MS", size=14, weight="bold"))
+            self.reports_canvas.pack(fill="both", expand=True)
+            self.current_visible_content_frame = self.reports_canvas
 
         else:
             target_btn_map = {
@@ -621,8 +628,8 @@ class StudyGuardianUI(ctk.CTk):
             mins, secs = divmod(max(0, self.study_seconds_left), 60)
             self.lbl_timer_clock.configure(text=f"{mins:02d}:{secs:02d}")
             self.live_monitoring_canvas.lbl_live_session_clock.configure(text=f"00:{mins:02d}:{secs:02d}")
-
-        self.after(100, self.update_timer_loop)
+        if self.winfo_exists():
+            self.after(100, self.update_timer_loop)
 
     def toggle_sidebar_expansion(self):
         """Animates expanding/collapsing the sidebar and updates text label string properties instantly."""
@@ -679,6 +686,17 @@ class StudyGuardianUI(ctk.CTk):
         except Exception as e:
             print(f"[UI STREAM ERROR] Failed painting video matrix: {str(e)}")
 
+    def on_closing(self):
+        """Cleanly stops background loops and exits the application without Tkinter after errors."""
+        # 1. Flag session as stopped to break background worker & timer loops
+        self.session_running = False
+
+        try:
+            self.withdraw()  # Hide window immediately
+            self.quit()  # Exit Tcl/Tk main loop cleanly
+            self.destroy()  # Destroy widgets
+        except Exception:
+            pass
 
 if __name__ == "__main__":
     app = StudyGuardianUI()

@@ -97,29 +97,67 @@ class LiveMonitoringView(ctk.CTkFrame):
         timers_row = ctk.CTkFrame(self, fg_color="transparent")
         timers_row.pack(side="bottom", fill="x", pady=(15, 0))
 
-        # Card A: Session Timer
+        # Card A: Session Timer (Interactive)
         t_card1 = ctk.CTkFrame(timers_row, fg_color="#faf6ee", border_width=1, border_color="#e5989b", corner_radius=12,
-                               height=85)
+                               height=100)
         t_card1.pack(side="left", expand=True, fill="both", padx=4)
+
         ctk.CTkLabel(t_card1, text="⏳ Session Timer", font=ctk.CTkFont(family="Comic Sans MS", size=11, weight="bold"),
-                     text_color="#4a4e69").pack(pady=(8, 0))
+                     text_color="#4a4e69").pack(pady=(5, 0))
+
         self.lbl_live_session_clock = ctk.CTkLabel(t_card1, text="00:50:00",
-                                                   font=ctk.CTkFont(family="Consolas", size=22, weight="bold"),
+                                                   font=ctk.CTkFont(family="Consolas", size=20, weight="bold"),
                                                    text_color="#5e548e")
-        self.lbl_live_session_clock.pack()
+        self.lbl_live_session_clock.pack(pady=(0, 2))
+
+        # Quick Time Selectors
+        preset_frame = ctk.CTkFrame(t_card1, fg_color="transparent")
+        preset_frame.pack(pady=(0, 5))
+
+        btn_25 = ctk.CTkButton(
+            preset_frame, text="25m", width=38, height=20, corner_radius=10,
+            font=ctk.CTkFont(size=10, weight="bold"),
+            fg_color="#f0ebf7", text_color="#5e548e", hover_color="#e3d5f5",
+            command=lambda: self.set_custom_study_duration(25)
+        )
+        btn_25.pack(side="left", padx=2)
+
+        btn_45 = ctk.CTkButton(
+            preset_frame, text="45m", width=38, height=20, corner_radius=10,
+            font=ctk.CTkFont(size=10, weight="bold"),
+            fg_color="#f0ebf7", text_color="#5e548e", hover_color="#e3d5f5",
+            command=lambda: self.set_custom_study_duration(45)
+        )
+        btn_45.pack(side="left", padx=2)
+
+        btn_60 = ctk.CTkButton(
+            preset_frame, text="60m", width=38, height=20, corner_radius=10,
+            font=ctk.CTkFont(size=10, weight="bold"),
+            fg_color="#f0ebf7", text_color="#5e548e", hover_color="#e3d5f5",
+            command=lambda: self.set_custom_study_duration(60)
+        )
+        btn_60.pack(side="left", padx=2)
+
+        btn_custom = ctk.CTkButton(
+            preset_frame, text="✏️", width=28, height=20, corner_radius=10,
+            font=ctk.CTkFont(size=10),
+            fg_color="#ff7096", text_color="#ffffff", hover_color="#ff4d6d",
+            command=self.open_custom_duration_dialog
+        )
+        btn_custom.pack(side="left", padx=2)
 
         # Card B: Sleep Timer
         t_card2 = ctk.CTkFrame(timers_row, fg_color="#faf6ee", border_width=1, border_color="#bda0bc", corner_radius=12,
-                               height=85)
+                               height=100)
         t_card2.pack(side="left", expand=True, fill="both", padx=4)
         ctk.CTkLabel(t_card2, text="💤 Sleep Timer", font=ctk.CTkFont(family="Comic Sans MS", size=11, weight="bold"),
                      text_color="#4a4e69").pack(pady=(8, 0))
         ctk.CTkLabel(t_card2, text="00:00", font=ctk.CTkFont(family="Consolas", size=22, weight="bold"),
-                     text_color="#e5989b").pack()
+                     text_color="#e5989b").pack(pady=(4, 0))
 
-        # Card C: Cute Break Reminder Status Card (Replaces the Button layout)
+        # Card C: Cute Break Reminder Status Card
         t_card3 = ctk.CTkFrame(timers_row, fg_color="#faf6ee", border_width=1, border_color="#c3b8a5", corner_radius=12,
-                               height=85)
+                               height=100)
         t_card3.pack(side="left", expand=True, fill="both", padx=4)
         ctk.CTkLabel(t_card3, text="☕ Break Reminder", font=ctk.CTkFont(family="Comic Sans MS", size=11, weight="bold"),
                      text_color="#4a4e69").pack(pady=(8, 0))
@@ -132,6 +170,36 @@ class LiveMonitoringView(ctk.CTkFrame):
     # ==========================================
     # DYNAMIC STATE ENGINE CONTROLLERS
     # ==========================================
+    def set_custom_study_duration(self, minutes: int):
+        """Updates the session timer display and sets target duration in config."""
+        hrs, mins = divmod(minutes, 60)
+        formatted_time = f"{hrs:02d}:{mins:02d}:00"
+
+        # Update UI timer label
+        self.lbl_live_session_clock.configure(text=formatted_time)
+
+        try:
+            import config
+            config.TARGET_STUDY_MINUTES = minutes
+            config.REMAINING_SESSION_SECONDS = minutes * 60
+        except Exception as e:
+            print(f"[CONFIG WARNING] Could not sync config file: {e}")
+
+        print(f"[SESSION TIMER UPDATED] Target study time set to: {minutes} minutes ({formatted_time})")
+
+    def open_custom_duration_dialog(self):
+        """Displays an input pop-up dialog for entering custom study minutes."""
+        dialog = ctk.CTkInputDialog(
+            title="Set Study Duration ⏳",
+            text="Enter custom study duration in minutes:"
+        )
+        user_input = dialog.get_input()
+
+        if user_input and user_input.isdigit():
+            mins = int(user_input)
+            if mins > 0:
+                self.set_custom_study_duration(mins)
+
     def update_ui_state(self, session_running):
         """Updates internal views and clears lingering frame captures without utilizing a button."""
         if session_running:

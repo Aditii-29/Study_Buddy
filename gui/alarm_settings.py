@@ -2,10 +2,11 @@
 import customtkinter as ctk
 import os
 import shutil
+import json
+from pathlib import Path
 from tkinter import filedialog
-import config
 from Engine.audio_manager import play_synth_track_async
-
+from gui.recorder_dialog import VoiceRecorderView
 
 class AlarmSettingsView(ctk.CTkFrame):
     def __init__(self, master, ui_parent):
@@ -24,6 +25,7 @@ class AlarmSettingsView(ctk.CTkFrame):
 
         # Array to track user-added custom uploaded audio tracks
         self.custom_tracks = []
+        self.load_custom_tracks_from_disk()
 
         # ==========================================
         # TOP CONTAINER: HEADER TITLE LAYOUT
@@ -60,9 +62,17 @@ class AlarmSettingsView(ctk.CTkFrame):
             buttons_frame, text="Record  🎙️", width=130, height=38, corner_radius=20,
             font=ctk.CTkFont(family="Comic Sans MS", size=13),
             fg_color="#faf6ee", text_color="#2a9d8f", hover_color="#eef8f6",
-            border_width=2, border_color="#2a9d8f"
+            border_width=2, border_color="#2a9d8f",
+            command=self.show_recording_page
         )
         btn_record.pack(side="left", padx=10)
+
+        # Create recorder view frame (hidden by default)
+        self.recorder_view = VoiceRecorderView(
+            self,
+            on_save_callback=self.handle_recorded_voice_save,
+            on_cancel_callback=self.show_sound_list_page
+        )
 
         # ==========================================
         # MAIN DOCK CONTAINER: THE SCROLLABLE SOUND BOX
@@ -79,6 +89,7 @@ class AlarmSettingsView(ctk.CTkFrame):
         )
         lbl_vault_header.pack(anchor="w", padx=15, pady=(10, 15))
 
+        # Refresh display after sound_vault_box is created
         self.refresh_sound_vault_display()
 
         # ==========================================
@@ -98,14 +109,72 @@ class AlarmSettingsView(ctk.CTkFrame):
         )
         lbl_speaker_doodle.pack(side="right", padx=10)
 
+    def show_recording_page(self):
+        """Swaps the view to show the recorder interface."""
+        self.sound_vault_box.pack_forget()
+        self.recorder_view.pack(fill="both", expand=True, pady=10)
+
+    def show_sound_list_page(self):
+        """Swaps back to the sound list."""
+        self.recorder_view.pack_forget()
+        self.sound_vault_box.pack(fill="both", expand=True)
+
+    def handle_recorded_voice_save(self, title_text, file_path):
+        """Saves voice note, adds to list, and restores sound list view."""
+        clean_title = f"🎙️ {title_text}"
+        new_track = {
+            "title": clean_title,
+            "file_path": file_path,
+            "color": "#2a9d8f",
+            "wave": " 〰️𝕍𝕠𝕚𝕔𝕖〰️ "
+        }
+        self.custom_tracks.append(new_track)
+        self.save_custom_tracks_to_disk()
+        self.toggle_heart_alarm(clean_title, custom_path=file_path)
+        self.show_sound_list_page()
+
+    def delete_custom_track(self, track_info):
+        """Deletes custom sound file from disk and removes it from the UI list."""
+        file_path = track_info.get("file_path", None)
+        track_title = track_info.get("title", "")
+
+        # 1. Remove file from disk if it exists
+        if file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+                print(f"[TRACK DELETED] Removed file from disk: {file_path}")
+            except Exception as e:
+                print(f"[DELETE ERROR] Could not remove file: {e}")
+
+        # 2. Remove track from internal custom list
+        self.custom_tracks = [t for t in self.custom_tracks if t["title"] != track_title]
+        self.save_custom_tracks_to_disk()
+
+        # 3. If deleted track was the active alarm, reset to default track
+        if self.ui_parent.selected_alarm_sound.get() == track_title:
+            self.toggle_heart_alarm("Morning Motivation", custom_path=None)
+
+        # 4. Refresh display
+        self.refresh_sound_vault_display()
+
     # ==========================================
     # FILE SELECTION & DYNAMIC RENDER CONTROLLERS
     # ==========================================
     def handle_add_song_upload(self):
-        """Opens file dialog picker to select custom sound file from computer."""
+        """Opens file dialog picker specifically configured for Audio Files."""
+        user_music_dir = os.path.expanduser("~/Music")
+        initial_dir = user_music_dir if os.path.exists(user_music_dir) else "/"
+
         file_path = filedialog.askopenfilename(
-            title="Select Custom Alarm Track",
-            filetypes=[("Audio Files", "*.mp3 *.wav")]
+            title="Select Custom Audio Track 🎵",
+            initialdir=initial_dir,
+            filetypes=[
+                ("Audio Files (*.mp3, *.wav, *.m4a, *.ogg)", "*.mp3 *.wav *.m4a *.ogg"),
+                ("MP3 Audio (*.mp3)", "*.mp3"),
+                ("WAV Audio (*.wav)", "*.wav"),
+                ("M4A Audio (*.m4a)", "*.m4a"),
+                ("All Files (*.*)", "*.*")
+            ]
         )
 
         if not file_path:
@@ -118,7 +187,6 @@ class AlarmSettingsView(ctk.CTkFrame):
 
             filename = os.path.basename(file_path)
             destination_path = os.path.join(target_dir, filename)
-
             shutil.copy(file_path, destination_path)
 
             clean_title = os.path.splitext(filename)[0].replace("_", " ").title()
@@ -131,10 +199,11 @@ class AlarmSettingsView(ctk.CTkFrame):
             }
 
             self.custom_tracks.append(new_track)
+            self.save_custom_tracks_to_disk()
             self.toggle_heart_alarm(clean_title, custom_path=destination_path)
 
         except Exception as e:
-            print(f"[FILE IMPORT ERROR] Could not import audio track: {str(e)}")
+            print(f"[FILE IMPORT ERROR] Could not import track: {str(e)}")
 
     def refresh_sound_vault_display(self):
         """Redraws the list items in the scrollable sound container."""
@@ -146,9 +215,42 @@ class AlarmSettingsView(ctk.CTkFrame):
         for track in all_tracks:
             self.create_sound_track_row(track)
 
+    def _get_storage_file(self):
+        """Returns the path to the custom tracks JSON storage file."""
+        storage_dir = Path(__file__).resolve().parent.parent / "assets"
+        storage_dir.mkdir(parents=True, exist_ok=True)
+        return storage_dir / "custom_tracks.json"
+
+    def save_custom_tracks_to_disk(self):
+        """Saves current custom tracks list to JSON file."""
+        try:
+            storage_file = self._get_storage_file()
+            with open(storage_file, "w", encoding="utf-8") as f:
+                json.dump(self.custom_tracks, f, indent=4)
+            print("[STORAGE] Saved custom tracks to disk.")
+        except Exception as e:
+            print(f"[STORAGE ERROR] Could not save tracks: {e}")
+
+    def load_custom_tracks_from_disk(self):
+        """Loads saved custom tracks from JSON file when app starts."""
+        storage_file = self._get_storage_file()
+        if storage_file.exists():
+            try:
+                with open(storage_file, "r", encoding="utf-8") as f:
+                    saved_tracks = json.load(f)
+                    # Keep only tracks whose audio files still exist on disk
+                    self.custom_tracks = [
+                        t for t in saved_tracks if Path(t["file_path"]).exists()
+                    ]
+                print(f"[STORAGE] Loaded {len(self.custom_tracks)} custom tracks.")
+            except Exception as e:
+                print(f"[STORAGE ERROR] Could not load tracks: {e}")
+                self.custom_tracks = []
+        else:
+            self.custom_tracks = []
+
     def create_sound_track_row(self, track_info):
-        """Renders an individual audio track card strip."""
-        # 1. Create row strip container FIRST so 'row_strip' is defined
+        """Renders an individual sound card item."""
         row_strip = ctk.CTkFrame(
             self.sound_vault_box, fg_color="#faf6ee", height=50,
             border_width=2, border_color="#decfe6", corner_radius=16
@@ -156,7 +258,6 @@ class AlarmSettingsView(ctk.CTkFrame):
         row_strip.pack(fill="x", pady=5, padx=10)
         row_strip.pack_propagate(False)
 
-        # 2. Define active status & heart icons FIRST so 'heart_icon' is defined
         current_active = self.ui_parent.selected_alarm_sound.get()
         is_active = (current_active == track_info["title"])
 
@@ -164,7 +265,7 @@ class AlarmSettingsView(ctk.CTkFrame):
         heart_text_color = "#ff4d6d" if is_active else "#ff7096"
         c_path = track_info.get("file_path", None)
 
-        # 3. Add Play Button
+        # Play / Preview Button
         btn_play = ctk.CTkButton(
             row_strip, text="▶", width=30, height=30, corner_radius=15,
             font=ctk.CTkFont(size=11), fg_color="transparent",
@@ -174,28 +275,38 @@ class AlarmSettingsView(ctk.CTkFrame):
         )
         btn_play.pack(side="left", padx=15, pady=8)
 
-        # 4. Add Song Title Label
+        # Track Title
         lbl_track_title = ctk.CTkLabel(
             row_strip, text=track_info["title"],
             font=ctk.CTkFont(family="Comic Sans MS", size=13, weight="bold"), text_color="#4a4e69"
         )
         lbl_track_title.pack(side="left", padx=5)
 
-        # 5. Add Heart Button (Now heart_icon and row_strip exist!)
+        # Heart / Favorite Button
         btn_heart = ctk.CTkButton(
             row_strip, text=heart_icon, width=30, height=30,
             font=ctk.CTkFont(size=18), fg_color="transparent", text_color=heart_text_color,
             hover_color="#f3ece0",
             command=lambda t=track_info["title"], p=c_path: self.toggle_heart_alarm(t, custom_path=p)
         )
-        btn_heart.pack(side="right", padx=15)
+        btn_heart.pack(side="right", padx=10)
 
-        # 6. Add Visual Audio Wave Representation
+        # Delete Button (Only shown for custom/uploaded/recorded tracks!)
+        if c_path:
+            btn_delete_track = ctk.CTkButton(
+                row_strip, text="🗑️", width=28, height=28, corner_radius=14,
+                font=ctk.CTkFont(size=12), fg_color="transparent", text_color="#e63946",
+                hover_color="#fdeae8",
+                command=lambda t=track_info: self.delete_custom_track(t)
+            )
+            btn_delete_track.pack(side="right", padx=5)
+
+        # Wave Label
         lbl_wave = ctk.CTkLabel(
             row_strip, text=track_info["wave"],
             font=ctk.CTkFont(family="Courier", size=12), text_color="#bda0bc"
         )
-        lbl_wave.pack(side="right", padx=20)
+        lbl_wave.pack(side="right", padx=10)
 
     def toggle_heart_alarm(self, track_title, custom_path=None):
         """Sets the selected track as active and clears out old paths if default sound picked."""
